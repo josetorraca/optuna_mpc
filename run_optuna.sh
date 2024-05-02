@@ -8,4 +8,4 @@ cd $PBS_O_WORKDIR
 module load tools/prod
 # module load SciPy-bundle/2022.05-foss-2022a
 
-python optuna_nmpc_base_v2.py
+python3 optuna_nmpc_base_v2.py
