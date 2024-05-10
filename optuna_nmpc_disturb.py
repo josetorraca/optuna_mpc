@@ -81,6 +81,21 @@ env_params = {
     'noise_percentage': 0.001
 }
 
+# Base disturbances
+disturbances = {'Ti': np.repeat([400, 420, 380], [nsteps//4, nsteps//2, nsteps//4])}
+
+# Disturbance bounds for 'Ti'
+disturbance_space = {
+    'low': np.array([100]),  # Lower bound for 'Ti'
+    'high': np.array([600])  # Upper bound for 'Ti'
+}
+
+# Update env_params with disturbances and their bounds
+env_params.update({
+    'disturbances': disturbances,
+    'disturbance_bounds': disturbance_space, # Disturbance space
+})
+
 # Configuration for reinforcement learning model
 config = {
     "policy": 'MlpPolicy',
@@ -155,10 +170,11 @@ model.save(os.path.join(save_dir, "PPO_cstr"))
 ##################################################################################
 
 # Function to run the Optuna study
-def run_study(env, save_dir, n_trials, rollout_number):
+def run_base_disturb_study(env, save_dir, n_trials, rollout_number):
     def objective(trial):
-        N = trial.suggest_int('N', 10, 25)
-        R = trial.suggest_loguniform('R', 1e-10, 1e-6)
+        N = trial.suggest_int('N', 5, 20)
+        # R = trial.suggest_loguniform('R', 1e-10, 1e-6)
+        R = trial.suggest_uniform('R', 1e-6, 1e-5)  # Suggesting a range for regularization term using linear scale
         try:
             evaluator, data = env.plot_rollout({'PPO': PPO.load(os.path.join(save_dir, "best_model"))}, rollout_number, oracle=True, dist_reward=False, MPC_params={'N': N, 'R': R})
             return np.mean(data['oracle']['r'][0])
@@ -170,30 +186,34 @@ def run_study(env, save_dir, n_trials, rollout_number):
     study.optimize(objective, n_trials=n_trials)
 
     # Save Optuna results
-    results_path = os.path.join(save_dir, "nmpc_optimization_results.txt")
+    results_path = os.path.join(save_dir, "nmpc_optimization_disturb_results.txt")
     with open(results_path, 'w') as f:
-        f.write(f"Best trial number: {study.best_trial}\n")
+        f.write(f"Best trial number: {study.best_trial.number}\n")
         f.write(f"Best parameters: {study.best_params}\n")
         f.write(f"Best observed reward: {study.best_value}\n")
 
     return study
 
 ##################################################################################
-# Optuna - Testing alternative trajectory (unachievable)
+# Optuna - Testing alternative disturbance (higher)
 ##################################################################################
 
-def run_alternative_trajectory_study(env_params, save_dir, n_trials, rollout_number):
-    # Update the environment parameters for the new setpoints
-    env_params['SP'] = {
-        'T': [330 for _ in range(5)] + [350 for _ in range(nsteps - 5)]
-    }
+def run_alternative_disturb_study(env_params, save_dir, n_trials, rollout_number):
+    # Update the environment parameters for the new disturbances
+    disturbances3 = {'Ti': np.repeat([400, 440, 380], [nsteps//4, nsteps//2, nsteps//4])}
 
-    # Create a new environment with updated setpoints
+    # Update env_params with alternative disturbances
+    env_params.update({
+        'disturbances': disturbances3,
+    })
+
+    # Create a new environment with updated disturbances
     env = create_env(env_params)
 
     def objective(trial):
-        N = trial.suggest_int('N', 10, 25)
-        R = trial.suggest_loguniform('R', 1e-10, 1e-6)
+        N = trial.suggest_int('N', 5, 20)  # Suggesting an integer range for the prediction horizon
+        # R = trial.suggest_loguniform('R', 1e-2, 1e-1)  # Suggesting a range for regularization term using log scale
+        R = trial.suggest_uniform('R', 1e-2, 1e-1)  # Suggesting a range for regularization term using linear scale
         try:
             evaluator, data = env.plot_rollout({'PPO': PPO.load(os.path.join(save_dir, "best_model"))}, rollout_number, oracle=True, dist_reward=False, MPC_params={'N': N, 'R': R})
             return np.mean(data['oracle']['r'][0])
@@ -205,7 +225,7 @@ def run_alternative_trajectory_study(env_params, save_dir, n_trials, rollout_num
     study.optimize(objective, n_trials=n_trials)
 
     # Save Optuna results for the alternative trajectory
-    results_path = os.path.join(save_dir, "nmpc_optimization_results_unachiev.txt")
+    results_path = os.path.join(save_dir, "nmpc_optimization_alt_disturb_results.txt")
     with open(results_path, 'w') as f:
         f.write(f"Best trial number: {study.best_trial.number}\n")
         f.write(f"Best parameters: {study.best_params}\n")
@@ -222,7 +242,7 @@ def main():
     n_trials=100
 
     # Number of rollouts for evaluation
-    rollout_number = 5
+    rollout_number = 3
     
     # Suppress output for cleaner execution
     original_stdout = sys.stdout
@@ -231,8 +251,8 @@ def main():
     sys.stderr = open(os.devnull, 'w')
 
     # Run studies
-    standard_study = run_study(env, save_dir, n_trials, rollout_number)
-    alternative_study = run_alternative_trajectory_study(env_params, save_dir, n_trials, rollout_number)
+    standard_study = run_base_disturb_study(env, save_dir, n_trials, rollout_number)
+    alternative_study = run_alternative_disturb_study(env_params, save_dir, n_trials, rollout_number)
 
     # Re-enable output
     sys.stdout = original_stdout
